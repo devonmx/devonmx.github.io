@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Grow a Garden</title>
+  <style>
+    /* Estilos generales */
+    body, button {
+      margin: 0;
+      font-family: "Comic Neue", cursive;
+      font-weight: 700;
+      font-style: normal;
+      background-image: url('../gag/back.png');
+      background-size: cover;
+      background-position: center;
+      background-attachment: fixed;
+      color: #2f4f4f;
+    }
+
+    .hero {
+      text-align: center;
+      padding: 15px 20px;
+      
+      max-width: 800px;
+      margin: 100px auto;
+      border-radius: 15px;
+    }
+
+    .hero p {
+      font-size: 1.2em;
+    }
+
+    img{
+        max-width: 350px;
+    }
+
+    button{
+        border-radius: 5px;
+        padding: 6px 26px;
+        background: mediumseagreen;
+        color: white;
+    }
+  </style>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:ital,wght@0,300;0,400;0,700;1,300;1,400;1,700&display=swap" rel="stylesheet">
+    <link rel="shortcut icon" href="../gag/favicon.webp">
+</head>
+<body>
+
+  <section class="hero">
+    <img src="../gag/logo.png">
+    <p id="status">Esperando inicio…</p>
+    <button id="startButton">Iniciar monitoreo</button>
+  </section>
+  
+
+  <!-- Sonidos -->
+  <audio id="alertSound" src="../gag/alerta.mp3" preload="auto"></audio>
+  <audio id="specialSound" src="../gag/especial.mp3" preload="auto"></audio>
+  <audio id="gearSound" src="../gag/gear.mp3" preload="auto"></audio>
+
+  <script>
+    // 🌱 Endpoints
+    const API_SEEDS = "https://gagapi.onrender.com/seeds";
+    const API_GEARS = "https://gagapi.onrender.com/gear";
+
+    // 🎯 Palabras clave
+    const targetSeeds = ["Mushroom", "Burning", "Pinecone", "Romanesco", "Elder", "Ember", "Beanstalk"];
+    const specialSeeds = ["Crimson", "Great"];
+    const targetGears = ["Shard", "Levelup", "Grandmaster", "Medium"];
+
+    let lastSeeds = {};
+    let lastGears = {};
+
+    // 🔁 Próximo chequeo (cada 5 min + 2 seg)
+    function getNextCheckDelay() {
+      const now = new Date();
+      const minutes = now.getMinutes();
+      const nextMinutes = Math.ceil((minutes + 1) / 5) * 5;
+      const next = new Date(now);
+      next.setMinutes(nextMinutes);
+      next.setSeconds(45);
+      next.setMilliseconds(0);
+      if (next <= now) next.setMinutes(next.getMinutes() + 5);
+      return next.getTime() - now.getTime();
+    }
+
+    async function checkSeeds() {
+      const found = { normal: [], special: [] };
+      try {
+        const resp = await fetch(API_SEEDS);
+        if (!resp.ok) throw new Error(`Seeds error: ${resp.status}`);
+        const seeds = await resp.json();
+
+        const currentMap = {};
+        for (const seed of seeds) currentMap[seed.name] = seed.quantity;
+
+        for (const { name, quantity } of seeds) {
+          for (const special of specialSeeds) {
+            if (name.includes(special)) {
+              found.special.push(`${name} x${quantity}`);
+              break;
+            }
+          }
+          for (const target of targetSeeds) {
+            if (name.includes(target)) {
+              found.normal.push(`${name} x${quantity}`);
+              break;
+            }
+          }
+        }
+
+        lastSeeds = currentMap;
+      } catch (err) {
+        console.error("Error al revisar semillas:", err);
+      }
+      return found;
+    }
+
+    async function checkGears() {
+      const found = [];
+      try {
+        const resp = await fetch(API_GEARS);
+        if (!resp.ok) throw new Error(`Gears error: ${resp.status}`);
+        const gears = await resp.json();
+
+        const currentMap = {};
+        for (const gear of gears) currentMap[gear.name] = gear.quantity;
+
+        for (const { name, quantity } of gears) {
+          for (const keyword of targetGears) {
+            if (name.includes(keyword)) {
+              found.push(`${name} x${quantity}`);
+              break;
+            }
+          }
+        }
+
+        lastGears = currentMap;
+      } catch (err) {
+        console.error("Error al revisar gears:", err);
+      }
+      return found;
+    }
+
+    async function checkAll(manual = false) {
+      const statusElem = document.getElementById("status");
+      statusElem.textContent = (manual ? "[Chequeo manual] " : "") + "Verificando...";
+
+      const [seedResults, gearResults] = await Promise.all([checkSeeds(), checkGears()]);
+      const foundSpecials = seedResults.special;
+      const foundNormals = seedResults.normal;
+      const foundGears = gearResults;
+
+      let playedSound = false;
+
+      // 🎵 Lógica de prioridad de sonido
+      if (foundSpecials.length > 0) {
+        document.getElementById("status").textContent =
+          "🌟 ¡Semillas especiales! " + foundSpecials.join(", ");
+        document.getElementById("specialSound").play().catch(() => {});
+        playedSound = true;
+      } else if (foundNormals.length > 0) {
+        document.getElementById("status").textContent =
+          "🌱 ¡Semillas encontradas! " + foundNormals.join(", ");
+        document.getElementById("alertSound").play().catch(() => {});
+        playedSound = true;
+      } else if (foundGears.length > 0) {
+        document.getElementById("status").textContent =
+          "⚙️ Gear encontrado: " + foundGears.join(", ");
+        if (!playedSound) {
+          document.getElementById("gearSound").play().catch(() => {});
+        }
+      } else {
+        document.getElementById("status").textContent =
+          "Sin resultados. Último chequeo: " + new Date().toLocaleTimeString();
+      }
+    }
+
+    function scheduleNextCheck() {
+      const delay = getNextCheckDelay();
+      const nextTime = new Date(Date.now() + delay);
+      console.log("⏱️ Próximo chequeo programado para:", nextTime.toLocaleTimeString());
+      setTimeout(() => {
+        checkAll();
+        scheduleNextCheck();
+      }, delay);
+    }
+
+    document.getElementById("startButton").addEventListener("click", async () => {
+      // 🔓 Desbloquear sonidos por interacción
+      const audios = [
+        document.getElementById("alertSound"),
+        document.getElementById("specialSound"),
+        document.getElementById("gearSound")
+      ];
+      for (const audio of audios) {
+        try {
+          await audio.play();
+          audio.pause();
+          audio.currentTime = 0;
+        } catch {}
+      }
+
+      document.getElementById("startButton").style.display = "none";
+      document.getElementById("status").textContent = "Monitoreo iniciado…";
+
+      checkAll(true);
+      scheduleNextCheck();
+    });
+  </script>
+</body>
+</html>
